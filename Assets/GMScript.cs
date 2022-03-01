@@ -337,19 +337,20 @@ public class GMScript : MonoBehaviour
     //
     //     return output;
     // } 
-    private const int GOOD_SCORE = 10000;
+    private const int BAD_SCORE = 10000;
     private const int MIN_HEIGHT = -10;
-    private int EvaluateEnemyPieceScore(Vector3Int[] piece, Vector3Int[] chunk, bool drop = true)
+    private int EvaluateEnemyPieceScore(Vector3Int[] piece, Vector3Int[] chunk, int level = 0, bool drop = true)
     {
-        if (null == piece) return -GOOD_SCORE;
+        if (null == piece) return BAD_SCORE;
         var combined = piece;
         if (chunk != null)
             combined = drop ? DropPiece(piece,false).Concat(chunk).ToArray() : piece.Concat(chunk).ToArray();
 
         var grouped = combined.GroupBy(p => p.x, p => p.y);
 
-        var heuristic = grouped.Sum(g => g.Max() - combined.Min(p => p.y) + 1 - g.Count());
-        Debug.Log("heuristic: " + heuristic);
+        int OverHangingBlocks = grouped.Sum(g => g.Max() - combined.Min(p => p.y) + 1 - g.Count());
+        int HeightOfBlock = DropPiece(piece, false).Max(p => p.y) - combined.Min(p => p.y);
+        var heuristic = OverHangingBlocks * 10000 + HeightOfBlock * 100 + level;
         return heuristic;
     }
 
@@ -362,19 +363,27 @@ public class GMScript : MonoBehaviour
         return enemyOptions.Where(p => ValidPiece(p, false)).ToArray();
     }
 
+    private int EnemySearchAction(Vector3Int[] piece, int level)
+    {
+        if (level == 3)
+            return EvaluateEnemyPieceScore(piece, _enemyChunk, level);
+        else
+        {
+            var cur = EvaluateEnemyPieceScore(piece, _enemyChunk, level);
+            var validOptions = GenerateValidEnemyOptions(piece);
+            var minChild = validOptions.Min(p => EnemySearchAction(p, level + 1));
+            return cur <= minChild ? cur : minChild;
+        }
+    }
+
     private Vector3Int[] EnemyChooseAction(Vector3Int[] piece)
     {
         if (null == piece) return null;
         Vector3Int[][] enemyOptions = GenerateValidEnemyOptions(piece);
         var validOptions = enemyOptions.Where(p => ValidPiece(p, false)).ToArray();
         if (!validOptions.Any()) return piece;
-        var maxScore = validOptions.Min(p => EvaluateEnemyPieceScore(p, _enemyChunk));
 
-        Debug.Log("Returned Not Piece With Heuristic: " + maxScore);
-
-        validOptions = validOptions.Where(p => EvaluateEnemyPieceScore(p, _enemyChunk) == maxScore).ToArray();
-        if (DEBUG_MODE) Debug.Log($"max score = {maxScore}; options = {validOptions.Length}");
-        return validOptions.ElementAt(Random.Range(0, validOptions.Count())); 
+        return validOptions.OrderBy(p => EnemySearchAction(p, 0)).First();
     }
     
     private void EnemyDoAction()
@@ -478,6 +487,14 @@ public class GMScript : MonoBehaviour
             MakeRandomAngryChunk();
         }
         else _inARow = 0;
+
+        row_to_kill = FindKillableRow(_enemyChunk, _maxEx - _minEx + 1);
+        if (NO_ROW != row_to_kill)
+        {
+            _enemyChunk = KillRow(_enemyChunk, row_to_kill);
+            _inARow++;
+        }
+        
         infoText.text = $"PTS:{_score}\t\tMAX:{_difficulty}\nCURRIC 576";
         _fixedUpdateCount = 1;
     }

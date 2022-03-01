@@ -242,7 +242,7 @@ public class GMScript : MonoBehaviour
             newPiece[i] = new Vector3Int(rotatedX, rotatedY);
         }
 
-        Array.Copy(newPiece, piece, piece.Length);
+        //Array.Copy(newPiece, piece, piece.Length);
         return newPiece;
     }
 
@@ -337,35 +337,53 @@ public class GMScript : MonoBehaviour
     //
     //     return output;
     // } 
-    private const int GOOD_SCORE = 10000;
-    private int EvaluateEnemyPieceScore(Vector3Int[] piece, Vector3Int[] chunk, bool drop = true)
+    private const int BAD_SCORE = 10000;
+    private const int MIN_HEIGHT = -10;
+    private int EvaluateEnemyPieceScore(Vector3Int[] piece, Vector3Int[] chunk, int level = 0, bool drop = true)
     {
-        if (null == piece || null == chunk) return -GOOD_SCORE;
-        var combined = drop ? DropPiece(piece,false).Concat(chunk).ToArray() : piece.Concat(chunk).ToArray();
-        
-        var row = FindKillableRow(combined, _maxEx - _minEx + 1);
-        if (row != NO_ROW)
+        if (null == piece) return BAD_SCORE;
+        var combined = piece;
+        if (chunk != null)
+            combined = drop ? DropPiece(piece,false).Concat(chunk).ToArray() : piece.Concat(chunk).ToArray();
+
+        var grouped = combined.GroupBy(p => p.x, p => p.y);
+
+        int OverHangingBlocks = grouped.Sum(g => g.Max() - combined.Min(p => p.y) + 1 - g.Count());
+        int HeightOfBlock = DropPiece(piece, false).Max(p => p.y) - combined.Min(p => p.y);
+        var heuristic = OverHangingBlocks * 10000 + HeightOfBlock * 100 + level;
+        return heuristic;
+    }
+
+    private Vector3Int[][] GenerateValidEnemyOptions(Vector3Int[] piece)
+    {
+        var enemyGoLeft = ShiftPiece(piece, -1, 0, false);
+        var enemyGoRight = ShiftPiece(piece, 1, 0, false);
+        var enemyGoRotate = RotatePiece(piece, false);
+        Vector3Int[][] enemyOptions = { enemyGoLeft, enemyGoRight, enemyGoRotate, piece };
+        return enemyOptions.Where(p => ValidPiece(p, false)).ToArray();
+    }
+
+    private int EnemySearchAction(Vector3Int[] piece, int level)
+    {
+        if (level == 3)
+            return EvaluateEnemyPieceScore(piece, _enemyChunk, level);
+        else
         {
-            Debug.Log("FOUND A LINE: ");
-            return GOOD_SCORE; // LINE!
+            var cur = EvaluateEnemyPieceScore(piece, _enemyChunk, level);
+            var validOptions = GenerateValidEnemyOptions(piece);
+            var minChild = validOptions.Min(p => EnemySearchAction(p, level + 1));
+            return cur <= minChild ? cur : minChild;
         }
-        if (DEBUG_MODE) Debug.Log($"{combined.Average(p => p.y)}");//\n{ChunkToString(combined)}");
-        return 100 * (int) (BOUNDS_MAX - combined.Average(p => p.y)); // HIGHEST SCORE = LOWEST AVERAGE 
     }
 
     private Vector3Int[] EnemyChooseAction(Vector3Int[] piece)
     {
-        if (null == piece) return null; 
-        var enemyGoLeft = ShiftPiece(piece, -1, 0, false);
-        var enemyGoRight = ShiftPiece(piece, 1, 0, false);
-        var enemyGoRotate = RotatePiece(piece, false);
-        Vector3Int[][] enemyOptions = {enemyGoLeft, enemyGoRight, enemyGoRotate, piece};
+        if (null == piece) return null;
+        Vector3Int[][] enemyOptions = GenerateValidEnemyOptions(piece);
         var validOptions = enemyOptions.Where(p => ValidPiece(p, false)).ToArray();
         if (!validOptions.Any()) return piece;
-        var maxScore = validOptions.Max(p => EvaluateEnemyPieceScore(p, _enemyChunk));
-        validOptions = validOptions.Where(p => EvaluateEnemyPieceScore(p, _enemyChunk) == maxScore).ToArray();
-        if (DEBUG_MODE) Debug.Log($"max score = {maxScore}; options = {validOptions.Length}");
-        return validOptions.ElementAt(Random.Range(0, validOptions.Count())); 
+
+        return validOptions.OrderBy(p => EnemySearchAction(p, 0)).First();
     }
     
     private void EnemyDoAction()
@@ -469,6 +487,14 @@ public class GMScript : MonoBehaviour
             MakeRandomAngryChunk();
         }
         else _inARow = 0;
+
+        row_to_kill = FindKillableRow(_enemyChunk, _maxEx - _minEx + 1);
+        if (NO_ROW != row_to_kill)
+        {
+            _enemyChunk = KillRow(_enemyChunk, row_to_kill);
+            _inARow++;
+        }
+        
         infoText.text = $"PTS:{_score}\t\tMAX:{_difficulty}\nCURRIC 576";
         _fixedUpdateCount = 1;
     }

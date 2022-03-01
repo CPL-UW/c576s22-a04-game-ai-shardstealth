@@ -242,7 +242,7 @@ public class GMScript : MonoBehaviour
             newPiece[i] = new Vector3Int(rotatedX, rotatedY);
         }
 
-        Array.Copy(newPiece, piece, piece.Length);
+        //Array.Copy(newPiece, piece, piece.Length);
         return newPiece;
     }
 
@@ -338,31 +338,46 @@ public class GMScript : MonoBehaviour
     //     return output;
     // } 
     private const int GOOD_SCORE = 10000;
+    private const int MIN_HEIGHT = -10;
     private int EvaluateEnemyPieceScore(Vector3Int[] piece, Vector3Int[] chunk, bool drop = true)
     {
         if (null == piece || null == chunk) return -GOOD_SCORE;
         var combined = drop ? DropPiece(piece,false).Concat(chunk).ToArray() : piece.Concat(chunk).ToArray();
-        
-        var row = FindKillableRow(combined, _maxEx - _minEx + 1);
-        if (row != NO_ROW)
-        {
-            Debug.Log("FOUND A LINE: ");
-            return GOOD_SCORE; // LINE!
-        }
-        if (DEBUG_MODE) Debug.Log($"{combined.Average(p => p.y)}");//\n{ChunkToString(combined)}");
-        return 100 * (int) (BOUNDS_MAX - combined.Average(p => p.y)); // HIGHEST SCORE = LOWEST AVERAGE 
+
+        var grouped = combined.GroupBy(p => p.x, p => p.y);
+
+        var heuristic = grouped.Sum(g => g.Max() - MIN_HEIGHT + 1 - g.Count());
+        Debug.Log("heuristic: " + heuristic);
+        return heuristic;
+        //var row = FindKillableRow(combined, _maxEx - _minEx + 1);
+        //if (row != NO_ROW)
+        //{
+        //    Debug.Log("FOUND A LINE: ");
+        //    return GOOD_SCORE; // LINE!
+        //}
+        //if (DEBUG_MODE) Debug.Log($"{combined.Average(p => p.y)}");//\n{ChunkToString(combined)}");
+        //return 100 * (int) (BOUNDS_MAX - combined.Average(p => p.y)); // HIGHEST SCORE = LOWEST AVERAGE 
     }
 
     private Vector3Int[] EnemyChooseAction(Vector3Int[] piece)
     {
-        if (null == piece) return null; 
+        if (null == piece) return null;
+        var tmpPiece = piece;
         var enemyGoLeft = ShiftPiece(piece, -1, 0, false);
         var enemyGoRight = ShiftPiece(piece, 1, 0, false);
         var enemyGoRotate = RotatePiece(piece, false);
         Vector3Int[][] enemyOptions = {enemyGoLeft, enemyGoRight, enemyGoRotate, piece};
         var validOptions = enemyOptions.Where(p => ValidPiece(p, false)).ToArray();
         if (!validOptions.Any()) return piece;
-        var maxScore = validOptions.Max(p => EvaluateEnemyPieceScore(p, _enemyChunk));
+        var maxScore = validOptions.Min(p => EvaluateEnemyPieceScore(p, _enemyChunk));
+
+        if (EvaluateEnemyPieceScore(piece, _enemyChunk) == maxScore)
+        {
+            Debug.Log("Returned Piece With Heuristic: " + EvaluateEnemyPieceScore(piece, _enemyChunk));
+            return piece;
+        }
+        Debug.Log("Returned Not Piece With Heuristic: " + maxScore);
+
         validOptions = validOptions.Where(p => EvaluateEnemyPieceScore(p, _enemyChunk) == maxScore).ToArray();
         if (DEBUG_MODE) Debug.Log($"max score = {maxScore}; options = {validOptions.Length}");
         return validOptions.ElementAt(Random.Range(0, validOptions.Count())); 

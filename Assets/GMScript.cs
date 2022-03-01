@@ -314,96 +314,58 @@ public class GMScript : MonoBehaviour
         }
     }
 
-    private string ChunkToString(Vector3Int[] chunk)
+    // private string ChunkToString(Vector3Int[] chunk)
+    // {
+    //     var output = "";
+    //     var min_y = chunk.Min(p => p.y);
+    //     var min_x = chunk.Min(p => p.x);
+    //     var max_y = chunk.Max(p => p.y);
+    //     var max_x = chunk.Max(p => p.x);
+    //     var truth_board = new bool[max_x-min_x+2,max_y-min_y+2];
+    //     foreach (var p in chunk)
+    //     {
+    //         truth_board[p.x - min_x, p.y - min_y] = true;
+    //     }
+    //     for (var x = min_x; x <= max_x; x++)
+    //     {
+    //         for (var y = min_y; y <= max_y; y++)
+    //         {
+    //             output += truth_board[x - min_x, y - min_y] ? "." : " ";
+    //         }
+    //         output += "\n";
+    //     }
+    //
+    //     return output;
+    // } 
+    private const int GOOD_SCORE = 10000;
+    private int EvaluateEnemyPieceScore(Vector3Int[] piece, Vector3Int[] chunk, bool drop = true)
     {
-        var output = "";
-        var min_y = chunk.Min(p => p.y);
-        var min_x = chunk.Min(p => p.x);
-        var max_y = chunk.Max(p => p.y);
-        var max_x = chunk.Max(p => p.x);
-        var truth_board = new bool[max_x - min_x + 2, max_y - min_y + 2];
-        foreach (var p in chunk)
+        if (null == piece || null == chunk) return -GOOD_SCORE;
+        var combined = drop ? DropPiece(piece,false).Concat(chunk).ToArray() : piece.Concat(chunk).ToArray();
+        
+        var row = FindKillableRow(combined, _maxEx - _minEx + 1);
+        if (row != NO_ROW)
         {
-            truth_board[p.x - min_x, p.y - min_y] = true;
+            Debug.Log("FOUND A LINE: ");
+            return GOOD_SCORE; // LINE!
         }
-        for (var x = min_x; x <= max_x; x++)
-        {
-            for (var y = min_y; y <= max_y; y++)
-            {
-                output += truth_board[x - min_x, y - min_y] ? "." : " ";
-            }
-            output += "\n";
-        }
-
-        return output;
-    }
-    private const int INVALID_PIECE = -10000;
-    private int EvaluateEnemyPieceScore(Vector3Int[] piece, Vector3Int[] chunk, int level = 0, bool drop = true)
-    {
-        if (null == piece) return INVALID_PIECE;
-        var combined = piece;
-        if (chunk != null)
-            combined = drop ? DropPiece(piece, false).Concat(chunk).ToArray() : piece.Concat(chunk).ToArray();
-
-        var grouped = combined.GroupBy(p => p.x, p => p.y);
-        var heuristic = grouped.Sum(g => g.Max() - combined.Min(p => p.y) + 1 - g.Count()) * 100 + combined.Max(p => p.y) * 10 + level;
-        Debug.Log("heuristic: " + heuristic);
-        //if (_enemyChunk != null)
-        //    Debug.Log("chunk: " + _enemyChunk.GroupBy(p => p.x, p => p.y).Sum(g => g.Max() - g.Min() + 1 - g.Count()));
-        return heuristic;
+        if (DEBUG_MODE) Debug.Log($"{combined.Average(p => p.y)}");//\n{ChunkToString(combined)}");
+        return 100 * (int) (BOUNDS_MAX - combined.Average(p => p.y)); // HIGHEST SCORE = LOWEST AVERAGE 
     }
 
-    private Vector3Int[][] GenerateValidEnemyOptions(Vector3Int[] piece)
-    {
-        var enemyGoLeft = ShiftPiece(piece, -1, 0, false);
-        var enemyGoRight = ShiftPiece(piece, 1, 0, false);
-        var enemyGoRotate = RotatePiece(piece, false);
-        Vector3Int[][] enemyOptions = { enemyGoLeft, enemyGoRight, enemyGoRotate, piece };
-        return enemyOptions.Where(p => ValidPiece(p, false)).ToArray();
-    }
-
-    private int EnemySearchAction(Vector3Int[] piece, int level)
-    {
-        if (level == 1)
-            return EvaluateEnemyPieceScore(piece, _enemyChunk, level);
-        else
-        {
-            var cur = EvaluateEnemyPieceScore(piece, _enemyChunk, level);
-            var validOptions = GenerateValidEnemyOptions(piece);
-            var minChild = validOptions.Min(p => EnemySearchAction(p, level + 1));
-            return cur <= minChild ? cur : minChild;
-        }
-    }
-
-    private Vector3Int[] EnemyChooseAction(Vector3Int[] piece, int level=0)
+    private Vector3Int[] EnemyChooseAction(Vector3Int[] piece)
     {
         if (null == piece) return null; 
-        var validOptions = GenerateValidEnemyOptions(piece);
-        if (!validOptions.Any()) return piece;
-
         var enemyGoLeft = ShiftPiece(piece, -1, 0, false);
         var enemyGoRight = ShiftPiece(piece, 1, 0, false);
         var enemyGoRotate = RotatePiece(piece, false);
-
-        //var a0 = EnemySearchAction(piece, 0);
-        //var a1 = EnemySearchAction(enemyGoLeft, 0);
-        //var a2 = EnemySearchAction(enemyGoRight, 0);
-        //var a3 = EnemySearchAction(enemyGoRotate, 0);
-
-        //if (a0 == validOptions.Min(p => EnemySearchAction(p, 0)))
-        //    return piece;
-        //return validOptions.OrderBy(p => EvaluateEnemyPieceScore(p, _enemyChunk, 0)).First();
-
-        //foreach (var p in validOptions[0])
-        //{
-        //    if (p == piece)
-        //        return p;
-        //}
-
-        //return validOptions.First().First();
-        var minSpaces = validOptions.Min(p => EvaluateEnemyPieceScore(p, _enemyChunk));
-        validOptions = validOptions.Where(p => EvaluateEnemyPieceScore(p, _enemyChunk) == minSpaces).ToArray();
-        return validOptions.ElementAt(Random.Range(0, validOptions.Count()));
+        Vector3Int[][] enemyOptions = {enemyGoLeft, enemyGoRight, enemyGoRotate, piece};
+        var validOptions = enemyOptions.Where(p => ValidPiece(p, false)).ToArray();
+        if (!validOptions.Any()) return piece;
+        var maxScore = validOptions.Max(p => EvaluateEnemyPieceScore(p, _enemyChunk));
+        validOptions = validOptions.Where(p => EvaluateEnemyPieceScore(p, _enemyChunk) == maxScore).ToArray();
+        if (DEBUG_MODE) Debug.Log($"max score = {maxScore}; options = {validOptions.Length}");
+        return validOptions.ElementAt(Random.Range(0, validOptions.Count())); 
     }
     
     private void EnemyDoAction()
